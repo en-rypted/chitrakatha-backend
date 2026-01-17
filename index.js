@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -14,52 +15,34 @@ const io = new Server(server, {
     }
 });
 
-// --- Security: IP Whitelisting ---
-const allowedIps = process.env.ALLOWED_IPS ? process.env.ALLOWED_IPS.split(',').map(ip => ip.trim()) : [];
+// --- Security: Password Authentication ---
+const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD;
+console.log("🔒 Password Protection:", ACCESS_PASSWORD ? "ENABLED" : "DISABLED (Open to all)");
 
-const isIpAllowed = (ip) => {
-    // If no allowed IPs defined, allow everyone (dev mode default)
-    if (allowedIps.length === 0) return true;
-
-    // Normalize IP (handle ::ffff: prefix for IPv4-mapped IPv6)
-    const normalizedIp = ip.replace(/^::ffff:/, '');
-    return allowedIps.includes(normalizedIp);
-};
-
-// Trust Proxy for Render/Cloud hosting
-app.set('trust proxy', 1);
-
-// Middleware for Socket.IO
-io.use((socket, next) => {
-    // Get IP from headers (x-forwarded-for) or direct connection
-    const forwardedFor = socket.handshake.headers['x-forwarded-for'];
-    const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : socket.handshake.address;
-
-    if (isIpAllowed(clientIp)) {
-        next();
-    } else {
-        console.log(`[Security] Rejected connection from unauthorized IP: ${clientIp}`);
-        next(new Error('Forbidden: IP not authorized'));
-    }
-});
-
-// Middleware for Express (HTTP)
-app.use((req, res, next) => {
-    const clientIp = req.ip; // Trust proxy handles x-forwarded-for automatically
-    if (isIpAllowed(clientIp)) {
-        next();
-    } else {
-        console.log(`[Security] Blocked HTTP request from: ${clientIp}`);
-        res.status(403).send('Forbidden');
-    }
-});
+// Middleware for Socket.IO - REMOVED for Action-Based Auth
+// io.use((socket, next) => { ... });
 
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
-    socket.on('join_room', (roomId) => {
+    socket.on('join_room', (data, callback) => {
+        // Handle both old format (string) and new format (object)
+        const roomId = typeof data === 'object' ? data.roomId : data;
+        const password = typeof data === 'object' ? data.password : null;
+
+        // Security Check
+        if (ACCESS_PASSWORD && password !== ACCESS_PASSWORD) {
+            console.log(`[Security] Join rejected for ${socket.id}: Invalid Password`);
+            if (typeof callback === 'function') callback({ error: "Unauthorized" });
+            return;
+        }
+
         socket.join(roomId);
         console.log(`User ${socket.id} joined room: ${roomId}`);
+
+        if (typeof callback === 'function') callback({ success: true });
+
+        // Notify others so Host can re-announce file if needed
 
         // Notify others so Host can re-announce file if needed
         socket.to(roomId).emit('user_joined', socket.id);
@@ -124,6 +107,12 @@ io.on('connection', (socket) => {
             signal: data.signal,
             from: socket.id
         });
+    });
+
+    // 3. Local Agent Announce (Relay to Room)
+    socket.on('agent_file_announce', (data) => {
+        console.log(`[${data.roomId}] Agent announced file:`, data.file.name);
+        socket.to(data.roomId).emit('agent_file_announce', data);
     });
 
     socket.on('disconnect', () => {
