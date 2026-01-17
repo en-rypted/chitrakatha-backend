@@ -14,6 +14,46 @@ const io = new Server(server, {
     }
 });
 
+// --- Security: IP Whitelisting ---
+const allowedIps = process.env.ALLOWED_IPS ? process.env.ALLOWED_IPS.split(',').map(ip => ip.trim()) : [];
+
+const isIpAllowed = (ip) => {
+    // If no allowed IPs defined, allow everyone (dev mode default)
+    if (allowedIps.length === 0) return true;
+
+    // Normalize IP (handle ::ffff: prefix for IPv4-mapped IPv6)
+    const normalizedIp = ip.replace(/^::ffff:/, '');
+    return allowedIps.includes(normalizedIp);
+};
+
+// Trust Proxy for Render/Cloud hosting
+app.set('trust proxy', 1);
+
+// Middleware for Socket.IO
+io.use((socket, next) => {
+    // Get IP from headers (x-forwarded-for) or direct connection
+    const forwardedFor = socket.handshake.headers['x-forwarded-for'];
+    const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : socket.handshake.address;
+
+    if (isIpAllowed(clientIp)) {
+        next();
+    } else {
+        console.log(`[Security] Rejected connection from unauthorized IP: ${clientIp}`);
+        next(new Error('Forbidden: IP not authorized'));
+    }
+});
+
+// Middleware for Express (HTTP)
+app.use((req, res, next) => {
+    const clientIp = req.ip; // Trust proxy handles x-forwarded-for automatically
+    if (isIpAllowed(clientIp)) {
+        next();
+    } else {
+        console.log(`[Security] Blocked HTTP request from: ${clientIp}`);
+        res.status(403).send('Forbidden');
+    }
+});
+
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
