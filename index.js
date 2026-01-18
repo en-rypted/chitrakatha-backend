@@ -115,6 +115,13 @@ io.on('connection', (socket) => {
         socket.to(data.roomId).emit('agent_file_announce', data);
     });
 
+    // 4. Local Agent Download Progress (Relay to Room)
+    socket.on('agent_download_progress', (data) => {
+        // data: { roomId, fileName, progress, downloaded, total, speed }
+        // Relay to the room so the requester (and others) can see progress
+        socket.to(data.roomId).emit('agent_download_progress', data);
+    });
+
     socket.on('disconnect', () => {
         console.log('User disconnected', socket.id);
     });
