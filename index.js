@@ -89,6 +89,21 @@ io.on('connection', (socket) => {
         socket.to(data.roomId).emit('sync_time', data);
     });
 
+    socket.on('sync_magnet_link', (data) => {
+        // data: { roomId, magnet, type }
+        // Host selected a torrent stream, share magnet link with all viewers
+        // Each viewer's local agent will process the magnet independently
+        socket.to(data.roomId).emit('sync_magnet_link', data);
+        console.log(`Sync Magnet Link in ${data.roomId}:`, data.type);
+    });
+
+    socket.on('torrent_metadata_update', (data) => {
+        // data: { roomId, streamId, duration, streams }
+        // Relay metadata updates when torrent duration becomes available
+        socket.to(data.roomId).emit('torrent_metadata_update', data);
+        console.log(`Torrent Metadata Update in ${data.roomId}: streamId=${data.streamId}, duration=${data.duration}s`);
+    });
+
     // --- P2P Signaling ---
 
     // 1. Host announces they have a file
